@@ -1,0 +1,281 @@
+@page "/jobs/create"
+@using JobSystem.Manager.Data
+@using JobSystem.Manager.Data.Entities
+@using System.Security.Cryptography
+@inject JobSystemDbContext DbContext
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>Create Job - Job System Manager</PageTitle>
+
+<h1>Create New Job</h1>
+
+<div class="row">
+    <div class="col-md-8">
+        <EditForm Model="_model" OnValidSubmit="HandleSubmitAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary class="alert alert-danger" />
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger">@_error</div>
+            }
+
+            <div class="card mb-3">
+                <div class="card-header">Basic Information</div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Job Name *</label>
+                        <InputText class="form-control" @bind-Value="_model.Name" />
+                        <ValidationMessage For="() => _model.Name" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <InputTextArea class="form-control" @bind-Value="_model.Description" rows="2" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Language *</label>
+                        <InputSelect class="form-select" @bind-Value="_model.Language">
+                            <option value="@JobLanguage.Node">Node.js</option>
+                            <option value="@JobLanguage.CSharp">C# (.NET)</option>
+                        </InputSelect>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-3">
+                <div class="card-header">Queue Configuration</div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Queue Type *</label>
+                        <InputSelect class="form-select" @bind-Value="_model.QueueType">
+                            <option value="@QueueType.SQS">Amazon SQS</option>
+                            <option value="@QueueType.MongoDB">MongoDB</option>
+                        </InputSelect>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Queue Connection String *</label>
+                        <InputText class="form-control" @bind-Value="_model.QueueConnectionString" />
+                        <small class="text-muted">
+                            @if (_model.QueueType == QueueType.SQS)
+                            {
+                                <text>AWS region or full SQS URL</text>
+                            }
+                            else
+                            {
+                                <text>MongoDB connection string</text>
+                            }
+                        </small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Queue Name *</label>
+                        <InputText class="form-control" @bind-Value="_model.QueueName" />
+                        <small class="text-muted">
+                            @if (_model.QueueType == QueueType.SQS)
+                            {
+                                <text>Full SQS queue URL</text>
+                            }
+                            else
+                            {
+                                <text>Format: database.collection</text>
+                            }
+                        </small>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Polling Interval (seconds)</label>
+                                <InputNumber class="form-control" @bind-Value="_model.QueuePollingIntervalSeconds" />
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Item Timeout (seconds)</label>
+                                <InputNumber class="form-control" @bind-Value="_model.QueueItemTimeoutSeconds" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-3">
+                <div class="card-header">Scaling Configuration</div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Instance Size</label>
+                                <InputSelect class="form-select" @bind-Value="_model.InstanceSize">
+                                    <option value="@InstanceSize.Small">Small (t3.small)</option>
+                                    <option value="@InstanceSize.Medium">Medium (t3.medium)</option>
+                                    <option value="@InstanceSize.Large">Large (t3.large)</option>
+                                </InputSelect>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Scale Mode</label>
+                                <InputSelect class="form-select" @bind-Value="_model.ScaleMode">
+                                    <option value="@ScaleMode.Aggressive">Aggressive</option>
+                                    <option value="@ScaleMode.Gradual">Gradual</option>
+                                </InputSelect>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Min Workers</label>
+                                <InputNumber class="form-control" @bind-Value="_model.MinWorkers" />
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Max Workers</label>
+                                <InputNumber class="form-control" @bind-Value="_model.MaxWorkers" />
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3 pt-4">
+                                <div class="form-check">
+                                    <InputCheckbox class="form-check-input" @bind-Value="_model.UseSpotInstances" />
+                                    <label class="form-check-label">Use Spot Instances</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-3">
+                <div class="card-header">Code Repository</div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Git Repository URL *</label>
+                        <InputText class="form-control" @bind-Value="_model.GitRepoUrl" placeholder="https://github.com/..." />
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Branch</label>
+                                <InputText class="form-control" @bind-Value="_model.GitBranch" />
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">S3 Code Path *</label>
+                                <InputText class="form-control" @bind-Value="_model.S3CodePath" placeholder="jobs/my-job" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-between">
+                <a href="/jobs" class="btn btn-outline-secondary">Cancel</a>
+                <button type="submit" class="btn btn-primary" disabled="@_saving">
+                    @if (_saving)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1"></span>
+                    }
+                    Create Job
+                </button>
+            </div>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    private JobFormModel _model = new();
+    private bool _saving = false;
+    private string? _error;
+
+    private async Task HandleSubmitAsync()
+    {
+        _saving = true;
+        _error = null;
+
+        try
+        {
+            // Check for duplicate name
+            if (DbContext.JobDefinitions.Any(j => j.Name == _model.Name))
+            {
+                _error = $"A job with name '{_model.Name}' already exists.";
+                return;
+            }
+
+            var job = new JobDefinition
+            {
+                Id = Guid.NewGuid(),
+                Name = _model.Name,
+                Description = _model.Description,
+                Language = _model.Language,
+                QueueType = _model.QueueType,
+                QueueConnectionString = _model.QueueConnectionString,
+                QueueName = _model.QueueName,
+                InstanceSize = _model.InstanceSize,
+                UseSpotInstances = _model.UseSpotInstances,
+                ScaleMode = _model.ScaleMode,
+                MinWorkers = _model.MinWorkers,
+                MaxWorkers = _model.MaxWorkers,
+                QueueItemTimeoutSeconds = _model.QueueItemTimeoutSeconds,
+                QueuePollingIntervalSeconds = _model.QueuePollingIntervalSeconds,
+                GitRepoUrl = _model.GitRepoUrl,
+                GitBranch = _model.GitBranch,
+                S3CodePath = _model.S3CodePath,
+                ApiKey = GenerateApiKey(),
+                IsEnabled = false,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            DbContext.JobDefinitions.Add(job);
+            await DbContext.SaveChangesAsync();
+
+            Navigation.NavigateTo($"/jobs/{job.Id}");
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to create job: {ex.Message}";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private static string GenerateApiKey()
+    {
+        var bytes = new byte[32];
+        using var rng = RandomNumberGenerator.Create();
+        rng.GetBytes(bytes);
+        return Convert.ToBase64String(bytes).Replace("+", "-").Replace("/", "_").TrimEnd('=');
+    }
+
+    private class JobFormModel
+    {
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public JobLanguage Language { get; set; } = JobLanguage.Node;
+        public QueueType QueueType { get; set; } = QueueType.SQS;
+        public string QueueConnectionString { get; set; } = "";
+        public string QueueName { get; set; } = "";
+        public InstanceSize InstanceSize { get; set; } = InstanceSize.Small;
+        public bool UseSpotInstances { get; set; } = true;
+        public ScaleMode ScaleMode { get; set; } = ScaleMode.Gradual;
+        public int MinWorkers { get; set; } = 0;
+        public int MaxWorkers { get; set; } = 10;
+        public int QueueItemTimeoutSeconds { get; set; } = 300;
+        public int QueuePollingIntervalSeconds { get; set; } = 30;
+        public string GitRepoUrl { get; set; } = "";
+        public string GitBranch { get; set; } = "main";
+        public string S3CodePath { get; set; } = "";
+    }
+}

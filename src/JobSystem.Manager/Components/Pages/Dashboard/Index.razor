@@ -1,0 +1,156 @@
+@page "/"
+@page "/dashboard"
+@using JobSystem.Manager.Data
+@using JobSystem.Manager.Data.Entities
+@using Microsoft.EntityFrameworkCore
+@inject JobSystemDbContext DbContext
+@rendermode InteractiveServer
+
+<PageTitle>Dashboard - Job System Manager</PageTitle>
+
+<h1>Dashboard</h1>
+
+@if (_loading)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Total Jobs</h5>
+                    <h2>@_stats.TotalJobs</h2>
+                    <small>@_stats.EnabledJobs enabled</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Active Workers</h5>
+                    <h2>@_stats.TotalActiveWorkers</h2>
+                    <small>@_stats.SpotWorkers spot / @_stats.OnDemandWorkers on-demand</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Spot Instances</h5>
+                    <h2>@_stats.SpotWorkers</h2>
+                    <small>Cost optimized</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-secondary text-white">
+                <div class="card-body">
+                    <h5 class="card-title">On-Demand</h5>
+                    <h2>@_stats.OnDemandWorkers</h2>
+                    <small>Always available</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h3>Jobs Overview</h3>
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Job Name</th>
+                <th>Status</th>
+                <th>Active Workers</th>
+                <th>Min / Max</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var job in _stats.JobStats)
+            {
+                <tr>
+                    <td>
+                        <a href="/jobs/@job.JobId">@job.JobName</a>
+                    </td>
+                    <td>
+                        @if (job.IsEnabled)
+                        {
+                            <span class="badge bg-success">Enabled</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">Disabled</span>
+                        }
+                    </td>
+                    <td>@job.ActiveWorkers</td>
+                    <td>@job.MinWorkers / @job.MaxWorkers</td>
+                    <td>
+                        <a href="/jobs/@job.JobId" class="btn btn-sm btn-outline-primary">View</a>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool _loading = true;
+    private DashboardStats _stats = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadStatsAsync();
+    }
+
+    private async Task LoadStatsAsync()
+    {
+        _loading = true;
+
+        var jobs = await DbContext.JobDefinitions
+            .Include(j => j.WorkerInstances.Where(w => w.Status == WorkerStatus.Running || w.Status == WorkerStatus.Pending))
+            .ToListAsync();
+
+        var activeWorkers = jobs.SelectMany(j => j.WorkerInstances).ToList();
+
+        _stats = new DashboardStats
+        {
+            TotalJobs = jobs.Count,
+            EnabledJobs = jobs.Count(j => j.IsEnabled),
+            TotalActiveWorkers = activeWorkers.Count,
+            SpotWorkers = activeWorkers.Count(w => w.IsSpotInstance),
+            OnDemandWorkers = activeWorkers.Count(w => !w.IsSpotInstance),
+            JobStats = jobs.Select(j => new JobStats
+            {
+                JobId = j.Id,
+                JobName = j.Name,
+                IsEnabled = j.IsEnabled,
+                ActiveWorkers = j.WorkerInstances.Count,
+                MinWorkers = j.MinWorkers,
+                MaxWorkers = j.MaxWorkers
+            }).ToList()
+        };
+
+        _loading = false;
+    }
+
+    private class DashboardStats
+    {
+        public int TotalJobs { get; set; }
+        public int EnabledJobs { get; set; }
+        public int TotalActiveWorkers { get; set; }
+        public int SpotWorkers { get; set; }
+        public int OnDemandWorkers { get; set; }
+        public List<JobStats> JobStats { get; set; } = new();
+    }
+
+    private class JobStats
+    {
+        public Guid JobId { get; set; }
+        public string JobName { get; set; } = "";
+        public bool IsEnabled { get; set; }
+        public int ActiveWorkers { get; set; }
+        public int MinWorkers { get; set; }
+        public int MaxWorkers { get; set; }
+    }
+}

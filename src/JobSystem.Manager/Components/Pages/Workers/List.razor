@@ -1,0 +1,189 @@
+@page "/workers"
+@using JobSystem.Manager.Data
+@using JobSystem.Manager.Data.Entities
+@using Microsoft.EntityFrameworkCore
+@inject JobSystemDbContext DbContext
+@rendermode InteractiveServer
+
+<PageTitle>Workers - Job System Manager</PageTitle>
+
+<h1>Workers</h1>
+
+<div class="mb-3">
+    <div class="btn-group">
+        <button class="btn @(_filter == null ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetFilter(null)">
+            All (@_allCount)
+        </button>
+        <button class="btn @(_filter == WorkerStatus.Running ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetFilter(WorkerStatus.Running)">
+            Running (@_runningCount)
+        </button>
+        <button class="btn @(_filter == WorkerStatus.Pending ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetFilter(WorkerStatus.Pending)">
+            Pending (@_pendingCount)
+        </button>
+        <button class="btn @(_filter == WorkerStatus.Terminated ? "btn-primary" : "btn-outline-primary")" @onclick="() => SetFilter(WorkerStatus.Terminated)">
+            Terminated
+        </button>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <p><em>Loading...</em></p>
+}
+else if (!_workers.Any())
+{
+    <div class="alert alert-info">No workers found.</div>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Job</th>
+                <th>EC2 Instance</th>
+                <th>IP Address</th>
+                <th>Type</th>
+                <th>Spot</th>
+                <th>Status</th>
+                <th>Launched</th>
+                <th>Last Heartbeat</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var worker in _workers)
+            {
+                <tr>
+                    <td>
+                        <a href="/jobs/@worker.JobDefinitionId">@worker.JobName</a>
+                    </td>
+                    <td><code>@worker.Ec2InstanceId</code></td>
+                    <td>@(worker.PrivateIpAddress ?? "-")</td>
+                    <td>@worker.InstanceType</td>
+                    <td>
+                        @if (worker.IsSpotInstance)
+                        {
+                            <span class="badge bg-info">Spot</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">On-Demand</span>
+                        }
+                    </td>
+                    <td>
+                        <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
+                    </td>
+                    <td>@worker.LaunchedAt.ToString("g")</td>
+                    <td>
+                        @if (worker.LastHeartbeatAt.HasValue)
+                        {
+                            var timeSince = DateTime.UtcNow - worker.LastHeartbeatAt.Value;
+                            if (timeSince.TotalMinutes < 2)
+                            {
+                                <span class="text-success">@worker.LastHeartbeatAt.Value.ToString("T")</span>
+                            }
+                            else
+                            {
+                                <span class="text-warning">@worker.LastHeartbeatAt.Value.ToString("g")</span>
+                            }
+                        }
+                        else
+                        {
+                            <text>-</text>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool _loading = true;
+    private WorkerStatus? _filter = null;
+    private List<WorkerViewModel> _workers = new();
+    private int _allCount;
+    private int _runningCount;
+    private int _pendingCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadWorkersAsync();
+    }
+
+    private async Task LoadWorkersAsync()
+    {
+        _loading = true;
+
+        var query = DbContext.WorkerInstances
+            .Include(w => w.JobDefinition)
+            .AsQueryable();
+
+        // Get counts
+        _allCount = await query.Where(w => w.Status != WorkerStatus.Terminated).CountAsync();
+        _runningCount = await query.Where(w => w.Status == WorkerStatus.Running).CountAsync();
+        _pendingCount = await query.Where(w => w.Status == WorkerStatus.Pending).CountAsync();
+
+        // Apply filter
+        if (_filter.HasValue)
+        {
+            query = query.Where(w => w.Status == _filter.Value);
+        }
+        else
+        {
+            query = query.Where(w => w.Status != WorkerStatus.Terminated);
+        }
+
+        var workers = await query
+            .OrderByDescending(w => w.LaunchedAt)
+            .Take(100)
+            .ToListAsync();
+
+        _workers = workers.Select(w => new WorkerViewModel
+        {
+            Id = w.Id,
+            JobDefinitionId = w.JobDefinitionId,
+            JobName = w.JobDefinition.Name,
+            Ec2InstanceId = w.Ec2InstanceId,
+            PrivateIpAddress = w.PrivateIpAddress,
+            InstanceType = w.InstanceType,
+            IsSpotInstance = w.IsSpotInstance,
+            Status = w.Status,
+            LaunchedAt = w.LaunchedAt,
+            LastHeartbeatAt = w.LastHeartbeatAt
+        }).ToList();
+
+        _loading = false;
+    }
+
+    private async Task SetFilter(WorkerStatus? filter)
+    {
+        _filter = filter;
+        await LoadWorkersAsync();
+    }
+
+    private string GetStatusBadgeClass(WorkerStatus status)
+    {
+        return status switch
+        {
+            WorkerStatus.Running => "bg-success",
+            WorkerStatus.Pending => "bg-warning",
+            WorkerStatus.Terminating => "bg-danger",
+            WorkerStatus.Terminated => "bg-secondary",
+            _ => "bg-secondary"
+        };
+    }
+
+    private class WorkerViewModel
+    {
+        public Guid Id { get; set; }
+        public Guid JobDefinitionId { get; set; }
+        public string JobName { get; set; } = "";
+        public string Ec2InstanceId { get; set; } = "";
+        public string? PrivateIpAddress { get; set; }
+        public string InstanceType { get; set; } = "";
+        public bool IsSpotInstance { get; set; }
+        public WorkerStatus Status { get; set; }
+        public DateTime LaunchedAt { get; set; }
+        public DateTime? LastHeartbeatAt { get; set; }
+    }
+}

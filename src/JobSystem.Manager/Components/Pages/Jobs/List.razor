@@ -1,0 +1,157 @@
+@page "/jobs"
+@using JobSystem.Manager.Data
+@using JobSystem.Manager.Data.Entities
+@using Microsoft.EntityFrameworkCore
+@inject JobSystemDbContext DbContext
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>Jobs - Job System Manager</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>Jobs</h1>
+    <a href="/jobs/create" class="btn btn-primary">Create New Job</a>
+</div>
+
+@if (_loading)
+{
+    <p><em>Loading...</em></p>
+}
+else if (!_jobs.Any())
+{
+    <div class="alert alert-info">
+        No jobs configured yet. <a href="/jobs/create">Create your first job</a>.
+    </div>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Language</th>
+                <th>Queue Type</th>
+                <th>Instance Size</th>
+                <th>Scale Mode</th>
+                <th>Workers</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var job in _jobs)
+            {
+                <tr>
+                    <td>
+                        <a href="/jobs/@job.Id">@job.Name</a>
+                        @if (!string.IsNullOrEmpty(job.Description))
+                        {
+                            <br /><small class="text-muted">@job.Description</small>
+                        }
+                    </td>
+                    <td>@job.Language</td>
+                    <td>@job.QueueType</td>
+                    <td>@job.InstanceSize</td>
+                    <td>
+                        @job.ScaleMode
+                        @if (job.UseSpotInstances)
+                        {
+                            <span class="badge bg-info ms-1">Spot</span>
+                        }
+                    </td>
+                    <td>@job.ActiveWorkerCount / @job.MaxWorkers</td>
+                    <td>
+                        @if (job.IsEnabled)
+                        {
+                            <span class="badge bg-success">Enabled</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">Disabled</span>
+                        }
+                    </td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            <a href="/jobs/@job.Id" class="btn btn-outline-primary">View</a>
+                            <a href="/jobs/@job.Id/edit" class="btn btn-outline-secondary">Edit</a>
+                            @if (job.IsEnabled)
+                            {
+                                <button class="btn btn-outline-warning" @onclick="() => ToggleJobAsync(job.Id, false)">Disable</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-outline-success" @onclick="() => ToggleJobAsync(job.Id, true)">Enable</button>
+                            }
+                        </div>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool _loading = true;
+    private List<JobViewModel> _jobs = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadJobsAsync();
+    }
+
+    private async Task LoadJobsAsync()
+    {
+        _loading = true;
+
+        var jobs = await DbContext.JobDefinitions
+            .Include(j => j.WorkerInstances.Where(w => w.Status == WorkerStatus.Running || w.Status == WorkerStatus.Pending))
+            .OrderBy(j => j.Name)
+            .ToListAsync();
+
+        _jobs = jobs.Select(j => new JobViewModel
+        {
+            Id = j.Id,
+            Name = j.Name,
+            Description = j.Description,
+            Language = j.Language.ToString(),
+            QueueType = j.QueueType.ToString(),
+            InstanceSize = j.InstanceSize.ToString(),
+            ScaleMode = j.ScaleMode.ToString(),
+            UseSpotInstances = j.UseSpotInstances,
+            MinWorkers = j.MinWorkers,
+            MaxWorkers = j.MaxWorkers,
+            ActiveWorkerCount = j.WorkerInstances.Count,
+            IsEnabled = j.IsEnabled
+        }).ToList();
+
+        _loading = false;
+    }
+
+    private async Task ToggleJobAsync(Guid jobId, bool enable)
+    {
+        var job = await DbContext.JobDefinitions.FindAsync(jobId);
+        if (job != null)
+        {
+            job.IsEnabled = enable;
+            job.UpdatedAt = DateTime.UtcNow;
+            await DbContext.SaveChangesAsync();
+            await LoadJobsAsync();
+        }
+    }
+
+    private class JobViewModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public string Language { get; set; } = "";
+        public string QueueType { get; set; } = "";
+        public string InstanceSize { get; set; } = "";
+        public string ScaleMode { get; set; } = "";
+        public bool UseSpotInstances { get; set; }
+        public int MinWorkers { get; set; }
+        public int MaxWorkers { get; set; }
+        public int ActiveWorkerCount { get; set; }
+        public bool IsEnabled { get; set; }
+    }
+}

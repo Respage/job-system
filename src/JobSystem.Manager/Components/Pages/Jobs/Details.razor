@@ -1,0 +1,293 @@
+@page "/jobs/{JobId:guid}"
+@using JobSystem.Manager.Data
+@using JobSystem.Manager.Data.Entities
+@using JobSystem.Manager.Services.CodeSync
+@using Microsoft.EntityFrameworkCore
+@inject JobSystemDbContext DbContext
+@inject ICodeSyncService CodeSyncService
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>@(_job?.Name ?? "Job Details") - Job System Manager</PageTitle>
+
+@if (_loading)
+{
+    <p><em>Loading...</em></p>
+}
+else if (_job == null)
+{
+    <div class="alert alert-danger">Job not found.</div>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1>@_job.Name</h1>
+            @if (!string.IsNullOrEmpty(_job.Description))
+            {
+                <p class="text-muted">@_job.Description</p>
+            }
+        </div>
+        <div>
+            <a href="/jobs/@JobId/edit" class="btn btn-outline-secondary me-2">Edit</a>
+            @if (_job.IsEnabled)
+            {
+                <button class="btn btn-warning" @onclick="() => ToggleJobAsync(false)">Disable</button>
+            }
+            else
+            {
+                <button class="btn btn-success" @onclick="() => ToggleJobAsync(true)">Enable</button>
+            }
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">Configuration</div>
+                <div class="card-body">
+                    <dl class="row mb-0">
+                        <dt class="col-sm-4">Language</dt>
+                        <dd class="col-sm-8">@_job.Language</dd>
+
+                        <dt class="col-sm-4">Queue Type</dt>
+                        <dd class="col-sm-8">@_job.QueueType</dd>
+
+                        <dt class="col-sm-4">Queue Name</dt>
+                        <dd class="col-sm-8"><code>@_job.QueueName</code></dd>
+
+                        <dt class="col-sm-4">Instance Size</dt>
+                        <dd class="col-sm-8">@_job.InstanceSize</dd>
+
+                        <dt class="col-sm-4">Scale Mode</dt>
+                        <dd class="col-sm-8">@_job.ScaleMode</dd>
+
+                        <dt class="col-sm-4">Spot Instances</dt>
+                        <dd class="col-sm-8">@(_job.UseSpotInstances ? "Yes" : "No")</dd>
+
+                        <dt class="col-sm-4">Min Workers</dt>
+                        <dd class="col-sm-8">@_job.MinWorkers</dd>
+
+                        <dt class="col-sm-4">Max Workers</dt>
+                        <dd class="col-sm-8">@_job.MaxWorkers</dd>
+
+                        <dt class="col-sm-4">Polling Interval</dt>
+                        <dd class="col-sm-8">@_job.QueuePollingIntervalSeconds seconds</dd>
+
+                        <dt class="col-sm-4">Item Timeout</dt>
+                        <dd class="col-sm-8">@_job.QueueItemTimeoutSeconds seconds</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">Code Repository</div>
+                <div class="card-body">
+                    <dl class="row mb-0">
+                        <dt class="col-sm-4">Git URL</dt>
+                        <dd class="col-sm-8"><code>@_job.GitRepoUrl</code></dd>
+
+                        <dt class="col-sm-4">Branch</dt>
+                        <dd class="col-sm-8">@_job.GitBranch</dd>
+
+                        <dt class="col-sm-4">S3 Path</dt>
+                        <dd class="col-sm-8"><code>@_job.S3CodePath</code></dd>
+
+                        @if (_lastSync != null)
+                        {
+                            <dt class="col-sm-4">Last Sync</dt>
+                            <dd class="col-sm-8">
+                                @_lastSync.StartedAt.ToString("g")
+                                @if (_lastSync.Status == CodeSyncStatus.Completed)
+                                {
+                                    <span class="badge bg-success ms-1">Success</span>
+                                }
+                                else if (_lastSync.Status == CodeSyncStatus.Failed)
+                                {
+                                    <span class="badge bg-danger ms-1">Failed</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-warning ms-1">In Progress</span>
+                                }
+                            </dd>
+
+                            @if (!string.IsNullOrEmpty(_lastSync.GitCommitHash))
+                            {
+                                <dt class="col-sm-4">Commit</dt>
+                                <dd class="col-sm-8"><code>@_lastSync.GitCommitHash[..7]</code></dd>
+                            }
+                        }
+                    </dl>
+
+                    <hr />
+
+                    <button class="btn btn-primary" @onclick="SyncCodeAsync" disabled="@_syncing">
+                        @if (_syncing)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Sync Code Now
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h3>Active Workers (@_workers.Count)</h3>
+    @if (!_workers.Any())
+    {
+        <div class="alert alert-info">No active workers.</div>
+    }
+    else
+    {
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Instance ID</th>
+                    <th>IP Address</th>
+                    <th>Type</th>
+                    <th>Spot</th>
+                    <th>Status</th>
+                    <th>Launched</th>
+                    <th>Last Heartbeat</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var worker in _workers)
+                {
+                    <tr>
+                        <td><code>@worker.Ec2InstanceId</code></td>
+                        <td>@(worker.PrivateIpAddress ?? "-")</td>
+                        <td>@worker.InstanceType</td>
+                        <td>@(worker.IsSpotInstance ? "Yes" : "No")</td>
+                        <td>
+                            <span class="badge @GetStatusBadgeClass(worker.Status)">@worker.Status</span>
+                        </td>
+                        <td>@worker.LaunchedAt.ToString("g")</td>
+                        <td>@(worker.LastHeartbeatAt?.ToString("g") ?? "-")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <h3>Recent Scaling Events</h3>
+    @if (!_scalingEvents.Any())
+    {
+        <div class="alert alert-info">No scaling events recorded.</div>
+    }
+    else
+    {
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Type</th>
+                    <th>Workers</th>
+                    <th>Queue Depth</th>
+                    <th>Reason</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var evt in _scalingEvents)
+                {
+                    <tr>
+                        <td>@evt.OccurredAt.ToString("g")</td>
+                        <td>
+                            @if (evt.EventType == ScalingEventType.ScaleUp)
+                            {
+                                <span class="badge bg-success">Scale Up</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-warning">Scale Down</span>
+                            }
+                        </td>
+                        <td>@evt.PreviousWorkerCount → @evt.NewWorkerCount</td>
+                        <td>@evt.QueueDepth</td>
+                        <td>@evt.Reason</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid JobId { get; set; }
+
+    private bool _loading = true;
+    private bool _syncing = false;
+    private JobDefinition? _job;
+    private List<WorkerInstance> _workers = new();
+    private List<ScalingEvent> _scalingEvents = new();
+    private CodeSyncHistory? _lastSync;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadJobAsync();
+    }
+
+    private async Task LoadJobAsync()
+    {
+        _loading = true;
+
+        _job = await DbContext.JobDefinitions
+            .Include(j => j.WorkerInstances.Where(w => w.Status != WorkerStatus.Terminated))
+            .Include(j => j.ScalingEvents.OrderByDescending(e => e.OccurredAt).Take(10))
+            .FirstOrDefaultAsync(j => j.Id == JobId);
+
+        if (_job != null)
+        {
+            _workers = _job.WorkerInstances.ToList();
+            _scalingEvents = _job.ScalingEvents.ToList();
+            _lastSync = await CodeSyncService.GetLatestSyncAsync(JobId);
+        }
+
+        _loading = false;
+    }
+
+    private async Task ToggleJobAsync(bool enable)
+    {
+        if (_job == null) return;
+
+        _job.IsEnabled = enable;
+        _job.UpdatedAt = DateTime.UtcNow;
+        await DbContext.SaveChangesAsync();
+        StateHasChanged();
+    }
+
+    private async Task SyncCodeAsync()
+    {
+        if (_job == null) return;
+
+        _syncing = true;
+        StateHasChanged();
+
+        try
+        {
+            await CodeSyncService.SyncJobCodeAsync(_job);
+            _lastSync = await CodeSyncService.GetLatestSyncAsync(JobId);
+        }
+        finally
+        {
+            _syncing = false;
+            StateHasChanged();
+        }
+    }
+
+    private string GetStatusBadgeClass(WorkerStatus status)
+    {
+        return status switch
+        {
+            WorkerStatus.Running => "bg-success",
+            WorkerStatus.Pending => "bg-warning",
+            WorkerStatus.Terminating => "bg-danger",
+            _ => "bg-secondary"
+        };
+    }
+}

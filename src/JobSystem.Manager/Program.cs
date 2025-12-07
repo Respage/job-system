@@ -20,6 +20,20 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+// Enable detailed errors for Blazor Server in development
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddServerSideBlazor()
+        .AddCircuitOptions(options =>
+        {
+            options.DetailedErrors = true;
+        })
+        .AddHubOptions(options =>
+        {
+            options.EnableDetailedErrors = true;
+        });
+}
+
 // Add controllers for API
 builder.Services.AddControllers();
 

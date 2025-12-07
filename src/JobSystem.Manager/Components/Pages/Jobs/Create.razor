@@ -243,7 +243,7 @@
         }
         catch (Exception ex)
         {
-            _error = $"Failed to create job: {ex.Message}";
+            _error = $"Failed to create job: {GetFullErrorMessage(ex)}";
         }
         finally
         {
@@ -257,6 +257,18 @@
         using var rng = RandomNumberGenerator.Create();
         rng.GetBytes(bytes);
         return Convert.ToBase64String(bytes).Replace("+", "-").Replace("/", "_").TrimEnd('=');
+    }
+
+    private static string GetFullErrorMessage(Exception ex)
+    {
+        var messages = new List<string>();
+        var current = ex;
+        while (current != null)
+        {
+            messages.Add(current.Message);
+            current = current.InnerException;
+        }
+        return string.Join(" → ", messages);
     }
 
     private class JobFormModel

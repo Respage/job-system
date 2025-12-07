@@ -10,7 +10,14 @@
 
 <h1>Dashboard</h1>
 
-@if (_loading)
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger">
+        <strong>Error loading dashboard:</strong> @_error
+        <button class="btn btn-outline-danger btn-sm ms-3" @onclick="LoadStatsAsync">Retry</button>
+    </div>
+}
+else if (_loading)
 {
     <p><em>Loading...</em></p>
 }
@@ -96,42 +103,76 @@ else
 
 @code {
     private bool _loading = true;
+    private string? _error;
     private DashboardStats _stats = new();
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadStatsAsync();
+        try
+        {
+            System.Diagnostics.Debug.WriteLine("Dashboard: OnInitializedAsync starting");
+            await LoadStatsAsync();
+            System.Diagnostics.Debug.WriteLine("Dashboard: OnInitializedAsync completed");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Dashboard: OnInitializedAsync FAILED: {ex}");
+            _error = GetFullErrorMessage(ex);
+            _loading = false;
+        }
     }
 
     private async Task LoadStatsAsync()
     {
         _loading = true;
+        _error = null;
 
-        var jobs = await DbContext.JobDefinitions
-            .Include(j => j.WorkerInstances.Where(w => w.Status == WorkerStatus.Running || w.Status == WorkerStatus.Pending))
-            .ToListAsync();
-
-        var activeWorkers = jobs.SelectMany(j => j.WorkerInstances).ToList();
-
-        _stats = new DashboardStats
+        try
         {
-            TotalJobs = jobs.Count,
-            EnabledJobs = jobs.Count(j => j.IsEnabled),
-            TotalActiveWorkers = activeWorkers.Count,
-            SpotWorkers = activeWorkers.Count(w => w.IsSpotInstance),
-            OnDemandWorkers = activeWorkers.Count(w => !w.IsSpotInstance),
-            JobStats = jobs.Select(j => new JobStats
-            {
-                JobId = j.Id,
-                JobName = j.Name,
-                IsEnabled = j.IsEnabled,
-                ActiveWorkers = j.WorkerInstances.Count,
-                MinWorkers = j.MinWorkers,
-                MaxWorkers = j.MaxWorkers
-            }).ToList()
-        };
+            var jobs = await DbContext.JobDefinitions
+                .Include(j => j.WorkerInstances.Where(w => w.Status == WorkerStatus.Running || w.Status == WorkerStatus.Pending))
+                .ToListAsync();
 
-        _loading = false;
+            var activeWorkers = jobs.SelectMany(j => j.WorkerInstances).ToList();
+
+            _stats = new DashboardStats
+            {
+                TotalJobs = jobs.Count,
+                EnabledJobs = jobs.Count(j => j.IsEnabled),
+                TotalActiveWorkers = activeWorkers.Count,
+                SpotWorkers = activeWorkers.Count(w => w.IsSpotInstance),
+                OnDemandWorkers = activeWorkers.Count(w => !w.IsSpotInstance),
+                JobStats = jobs.Select(j => new JobStats
+                {
+                    JobId = j.Id,
+                    JobName = j.Name,
+                    IsEnabled = j.IsEnabled,
+                    ActiveWorkers = j.WorkerInstances.Count,
+                    MinWorkers = j.MinWorkers,
+                    MaxWorkers = j.MaxWorkers
+                }).ToList()
+            };
+        }
+        catch (Exception ex)
+        {
+            _error = GetFullErrorMessage(ex);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string GetFullErrorMessage(Exception ex)
+    {
+        var messages = new List<string>();
+        var current = ex;
+        while (current != null)
+        {
+            messages.Add(current.Message);
+            current = current.InnerException;
+        }
+        return string.Join(" → ", messages);
     }
 
     private class DashboardStats

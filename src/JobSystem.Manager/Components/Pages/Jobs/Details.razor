@@ -10,6 +10,14 @@
 
 <PageTitle>@(_job?.Name ?? "Job Details") - Job System Manager</PageTitle>
 
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger alert-dismissible fade show">
+        <strong>Error:</strong> @_error
+        <button type="button" class="btn-close" @onclick="() => _error = null"></button>
+    </div>
+}
+
 @if (_loading)
 {
     <p><em>Loading...</em></p>
@@ -222,6 +230,7 @@ else
 
     private bool _loading = true;
     private bool _syncing = false;
+    private string? _error;
     private JobDefinition? _job;
     private List<WorkerInstance> _workers = new();
     private List<ScalingEvent> _scalingEvents = new();
@@ -266,6 +275,7 @@ else
         if (_job == null) return;
 
         _syncing = true;
+        _error = null;
         StateHasChanged();
 
         try
@@ -273,11 +283,27 @@ else
             await CodeSyncService.SyncJobCodeAsync(_job);
             _lastSync = await CodeSyncService.GetLatestSyncAsync(JobId);
         }
+        catch (Exception ex)
+        {
+            _error = GetFullErrorMessage(ex);
+        }
         finally
         {
             _syncing = false;
             StateHasChanged();
         }
+    }
+
+    private static string GetFullErrorMessage(Exception ex)
+    {
+        var messages = new List<string>();
+        var current = ex;
+        while (current != null)
+        {
+            messages.Add(current.Message);
+            current = current.InnerException;
+        }
+        return string.Join(" → ", messages);
     }
 
     private string GetStatusBadgeClass(WorkerStatus status)

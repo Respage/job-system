@@ -1,4 +1,5 @@
 ﻿@inherits LayoutComponentBase
+@inject IHostEnvironment Environment
 
 <div class="page">
     <div class="sidebar">
@@ -11,7 +12,25 @@
         </div>
 
         <article class="content px-4">
-            @Body
+            <ErrorBoundary @ref="_errorBoundary">
+                <ChildContent>
+                    @Body
+                </ChildContent>
+                <ErrorContent Context="ex">
+                    <div class="alert alert-danger">
+                        <h4>An error occurred</h4>
+                        <p><strong>Message:</strong> @GetFullErrorMessage(ex)</p>
+                        @if (Environment.IsDevelopment())
+                        {
+                            <details>
+                                <summary>Stack Trace</summary>
+                                <pre style="white-space: pre-wrap; font-size: 0.85em;">@ex.StackTrace</pre>
+                            </details>
+                        }
+                        <button class="btn btn-outline-danger mt-2" @onclick="Recover">Try Again</button>
+                    </div>
+                </ErrorContent>
+            </ErrorBoundary>
         </article>
     </main>
 </div>
@@ -21,3 +40,24 @@
     <a href="" class="reload">Reload</a>
     <a class="dismiss">🗙</a>
 </div>
+
+@code {
+    private ErrorBoundary? _errorBoundary;
+
+    private void Recover()
+    {
+        _errorBoundary?.Recover();
+    }
+
+    private static string GetFullErrorMessage(Exception ex)
+    {
+        var messages = new List<string>();
+        var current = ex;
+        while (current != null)
+        {
+            messages.Add(current.Message);
+            current = current.InnerException;
+        }
+        return string.Join(" → ", messages);
+    }
+}
